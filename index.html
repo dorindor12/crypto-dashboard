@@ -28,6 +28,9 @@
       <button class="nav-item" data-tab="scalp">
         <span class="nav-icon">⚡</span> Скальпинг
       </button>
+      <button class="nav-item" data-tab="metascalp">
+        <span class="nav-icon">🎯</span> Метаскальп
+      </button>
     </nav>
     <div class="sidebar-status">
       <div class="status-row">
@@ -308,6 +311,108 @@
       <div id="scalp-grid" class="scalp-grid"></div>
     </section>
 
+    <!-- METASCALP TAB -->
+    <section class="tab-section" id="tab-metascalp">
+      <div class="page-header">
+        <h1>Метаскальп — live order book</h1>
+        <p class="page-sub">Real-time order book heatmap, tape, iceberg/refill detector и алерты для входа в стакан</p>
+      </div>
+
+      <div class="controls-bar metascalp-controls">
+        <div class="control-group">
+          <label>Биржа</label>
+          <div class="exchange-toggles" id="ms-exchanges">
+            <label class="toggle-chip"><input type="radio" name="ms-exchange" value="binance"/> Binance</label>
+            <label class="toggle-chip"><input type="radio" name="ms-exchange" value="bybit" checked/> Bybit</label>
+            <label class="toggle-chip"><input type="radio" name="ms-exchange" value="okx"/> OKX</label>
+            <label class="toggle-chip"><input type="radio" name="ms-exchange" value="bitget"/> Bitget</label>
+            <label class="toggle-chip disabled" title="v2: protobuf — следующий PR"><input type="radio" name="ms-exchange" value="mexc" disabled/> MEXC <span class="chip-tag">v2</span></label>
+            <label class="toggle-chip disabled" title="v2: gzip — следующий PR"><input type="radio" name="ms-exchange" value="bingx" disabled/> BingX <span class="chip-tag">v2</span></label>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Мин. размер сделки</label>
+          <select id="ms-tape-min">
+            <option value="0">Все</option>
+            <option value="1000" selected>≥ $1k</option>
+            <option value="10000">≥ $10k</option>
+            <option value="100000">≥ $100k</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Звук алерта</label>
+          <label class="toggle-chip" style="margin-top:4px;">
+            <input type="checkbox" id="ms-sound" checked/> Sound
+          </label>
+        </div>
+        <div class="control-group">
+          <label>Browser notif</label>
+          <label class="toggle-chip" style="margin-top:4px;">
+            <input type="checkbox" id="ms-notify"/> Notify
+          </label>
+        </div>
+        <div class="control-group" style="flex:1; min-width:240px;">
+          <label>Telegram webhook (опц.)</label>
+          <input type="text" id="ms-tg-webhook" placeholder="https://api.telegram.org/bot.../sendMessage?chat_id=..."
+                 style="width:100%; min-width:240px;"/>
+        </div>
+        <button class="refresh-btn" id="ms-connect-btn">▶ Подключить</button>
+      </div>
+
+      <div class="metascalp-status" id="ms-status">
+        Выберите биржу и нажмите «Подключить» — стрим открывается прямо в браузере (без CORS-прокси).
+      </div>
+
+      <!-- INDICATORS -->
+      <div class="metrics-row" id="ms-metrics" hidden>
+        <div class="metric-card">
+          <div class="metric-label">Spread</div>
+          <div class="metric-value" id="ms-spread">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Microprice</div>
+          <div class="metric-value" id="ms-microprice">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Imbalance ±10 bps</div>
+          <div class="metric-value" id="ms-imbalance">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">CVD 1m / 5m / 15m</div>
+          <div class="metric-value" id="ms-cvd">—</div>
+        </div>
+      </div>
+
+      <!-- 3-COLUMN LAYOUT: book | tape | alerts -->
+      <div class="metascalp-grid" id="ms-grid" hidden>
+        <div class="card metascalp-card">
+          <div class="card-head">
+            <span class="card-title">Order book — топ-20</span>
+            <span class="card-hint" id="ms-book-meta">—</span>
+          </div>
+          <div class="metascalp-book" id="ms-book"></div>
+        </div>
+
+        <div class="card metascalp-card">
+          <div class="card-head">
+            <span class="card-title">Tape (поток сделок)</span>
+            <span class="card-hint" id="ms-tape-meta">—</span>
+          </div>
+          <div class="metascalp-tape" id="ms-tape"></div>
+        </div>
+
+        <div class="card metascalp-card">
+          <div class="card-head">
+            <span class="card-title">Algo alerts</span>
+            <span class="card-hint" id="ms-alerts-meta">0 событий</span>
+          </div>
+          <div class="metascalp-alerts" id="ms-alerts">
+            <div class="alerts-empty">Алерты появятся при обнаружении iceberg / refill паттернов на стакане.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- DETAIL MODAL — opens when a scalp card is clicked -->
     <div class="modal-overlay" id="scalp-modal" hidden>
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="scalp-modal-title">
@@ -350,5 +455,6 @@
 
 <script src="api.js"></script>
 <script src="app.js"></script>
+<script src="metascalp.js"></script>
 </body>
 </html>
