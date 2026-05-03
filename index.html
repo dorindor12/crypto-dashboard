@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Crypto Arbitrage & Scam Detector</title>
+<link rel="stylesheet" href="style.css"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="logo">
+      <span class="logo-icon">◈</span>
+      <span class="logo-text">CryptoLens</span>
+    </div>
+    <nav class="nav">
+      <button class="nav-item active" data-tab="arbitrage">
+        <span class="nav-icon">⇄</span> Арбитраж
+      </button>
+      <button class="nav-item" data-tab="scam">
+        <span class="nav-icon">⚠</span> Скам-паттерн
+      </button>
+    </nav>
+    <div class="sidebar-status">
+      <div class="status-row">
+        <span class="live-dot" id="conn-dot"></span>
+        <span id="conn-label">Подключение...</span>
+      </div>
+      <div class="status-row" style="margin-top:6px;">
+        <span class="status-muted">Обновлено:</span>
+        <span id="last-update">—</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- ARBITRAGE TAB -->
+    <section class="tab-section active" id="tab-arbitrage">
+      <div class="page-header">
+        <h1>Арбитраж</h1>
+        <p class="page-sub">Одна монета — все биржи — реальные цены</p>
+      </div>
+
+      <div class="controls-bar">
+        <div class="control-group">
+          <label>Монета</label>
+          <select id="coin-select">
+            <option value="BTC">BTC/USDT</option>
+            <option value="ETH">ETH/USDT</option>
+            <option value="SOL">SOL/USDT</option>
+            <option value="BNB">BNB/USDT</option>
+            <option value="XRP">XRP/USDT</option>
+            <option value="DOGE">DOGE/USDT</option>
+            <option value="ADA">ADA/USDT</option>
+            <option value="AVAX">AVAX/USDT</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Мин. спред</label>
+          <select id="spread-filter">
+            <option value="0">Все</option>
+            <option value="0.1">≥ 0.1%</option>
+            <option value="0.3">≥ 0.3%</option>
+            <option value="0.5">≥ 0.5%</option>
+            <option value="1.0">≥ 1.0%</option>
+          </select>
+        </div>
+        <button class="refresh-btn" id="refresh-btn" onclick="fetchAll()">↻ Обновить</button>
+      </div>
+
+      <!-- METRICS -->
+      <div class="metrics-row" id="arb-metrics">
+        <div class="metric-card">
+          <div class="metric-label">Макс. спред</div>
+          <div class="metric-value" id="m-maxspread">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Мин. цена</div>
+          <div class="metric-value" id="m-minprice">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Макс. цена</div>
+          <div class="metric-value" id="m-maxprice">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Бирж онлайн</div>
+          <div class="metric-value" id="m-exchanges">—</div>
+        </div>
+      </div>
+
+      <!-- SIGNAL -->
+      <div id="arb-signal" class="signal-box hidden"></div>
+
+      <!-- TABLE -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Цены по биржам</span>
+          <span class="card-hint">Сортировка по цене ↑</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="arb-table">
+            <thead>
+              <tr>
+                <th>Биржа</th>
+                <th>Цена (USDT)</th>
+                <th>Спред к мин.</th>
+                <th>Изменение 24h</th>
+                <th>Объём 24h</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody id="arb-tbody">
+              <tr><td colspan="6" class="loading-cell">Загружаем данные...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- SPREAD CHART -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">История спреда (последние обновления)</span>
+        </div>
+        <div class="chart-wrap" style="height:200px;">
+          <canvas id="spreadChart" role="img" aria-label="Spread history line chart">История спреда между биржами</canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCAM TAB -->
+    <section class="tab-section" id="tab-scam">
+      <div class="page-header">
+        <h1>Скам-паттерн</h1>
+        <p class="page-sub">Pump & dump детектор — повторяющиеся циклы</p>
+      </div>
+
+      <div class="controls-bar">
+        <div class="control-group">
+          <label>Монета (CoinGecko ID)</label>
+          <select id="scam-coin-select">
+            <option value="bitcoin">Bitcoin (BTC)</option>
+            <option value="ethereum">Ethereum (ETH)</option>
+            <option value="solana">Solana (SOL)</option>
+            <option value="dogecoin">Dogecoin (DOGE)</option>
+            <option value="shiba-inu">Shiba Inu (SHIB)</option>
+            <option value="pepe">Pepe (PEPE)</option>
+            <option value="floki">Floki (FLOKI)</option>
+            <option value="bonk">Bonk (BONK)</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Период</label>
+          <select id="scam-days">
+            <option value="30">30 дней</option>
+            <option value="60">60 дней</option>
+            <option value="90">90 дней</option>
+          </select>
+        </div>
+        <button class="refresh-btn" onclick="fetchScamData()">↻ Загрузить</button>
+      </div>
+
+      <!-- SCAM METRICS -->
+      <div class="metrics-row">
+        <div class="metric-card">
+          <div class="metric-label">Циклов обнаружено</div>
+          <div class="metric-value" id="sm-cycles">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Макс. pump</div>
+          <div class="metric-value green" id="sm-maxpump">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Макс. dump</div>
+          <div class="metric-value red" id="sm-maxdump">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Текущая фаза</div>
+          <div class="metric-value" id="sm-phase">—</div>
+        </div>
+      </div>
+
+      <div id="scam-signal" class="signal-box hidden"></div>
+
+      <!-- PRICE CHART WITH PATTERNS -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">График цены с паттернами pump & dump</span>
+          <div class="legend-row">
+            <span class="leg-item"><span class="leg-dot" style="background:#378ADD;"></span>Цена</span>
+            <span class="leg-item"><span class="leg-dot" style="background:#1D9E75;"></span>Pump зона</span>
+            <span class="leg-item"><span class="leg-dot" style="background:#D85A30;"></span>Dump зона</span>
+          </div>
+        </div>
+        <div class="chart-wrap" style="height:280px;">
+          <canvas id="scamPriceChart" role="img" aria-label="Price chart with pump and dump pattern zones">График цены с зонами паттернов</canvas>
+        </div>
+      </div>
+
+      <!-- VOLUME CHART -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Объём торгов — всплески объёма предшествуют памп-циклам</span>
+        </div>
+        <div class="chart-wrap" style="height:160px;">
+          <canvas id="scamVolChart" role="img" aria-label="Volume chart">График объёма</canvas>
+        </div>
+      </div>
+
+      <!-- PHASE GUIDE -->
+      <div class="card">
+        <div class="card-head"><span class="card-title">Фазы цикла pump & dump</span></div>
+        <div class="phase-grid">
+          <div class="phase-card phase-1">
+            <div class="phase-num">Фаза 1</div>
+            <div class="phase-name">Накопление</div>
+            <div class="phase-desc">Объём тихо растёт. Цена стоит. Крупные игроки набирают позицию незаметно.</div>
+          </div>
+          <div class="phase-card phase-2">
+            <div class="phase-num">Фаза 2</div>
+            <div class="phase-name">Pump</div>
+            <div class="phase-desc">Резкий рост цены +50–500%. Хайп в соцсетях. Массовые покупки розницы.</div>
+          </div>
+          <div class="phase-card phase-3">
+            <div class="phase-num">Фаза 3</div>
+            <div class="phase-name">Пик / распродажа</div>
+            <div class="phase-desc">Крупные игроки продают. Высокая волатильность. Объём максимальный.</div>
+          </div>
+          <div class="phase-card phase-4">
+            <div class="phase-num">Фаза 4</div>
+            <div class="phase-name">Dump</div>
+            <div class="phase-desc">Обвал цены. Объём падает. Розничные инвесторы с убытками.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="api.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
