@@ -40,6 +40,26 @@
   <!-- MAIN -->
   <main class="main">
 
+    <!-- TOPBAR — global coin search -->
+    <div class="topbar">
+      <div class="topbar-search" id="topbar-search">
+        <span class="topbar-search-icon" aria-hidden="true">⌕</span>
+        <input type="text" class="topbar-search-input" id="global-coin-input"
+               placeholder="Загружаем монеты..." autocomplete="off"
+               aria-label="Поиск монеты" disabled/>
+        <kbd class="topbar-search-kbd">/</kbd>
+        <div class="combo-list topbar-search-list" id="global-coin-list" hidden></div>
+      </div>
+      <div class="topbar-selected" id="topbar-selected" hidden>
+        <img class="topbar-selected-img" alt=""/>
+        <div class="topbar-selected-meta">
+          <div class="topbar-selected-symbol"></div>
+          <div class="topbar-selected-name"></div>
+        </div>
+        <div class="topbar-selected-rank"></div>
+      </div>
+    </div>
+
     <!-- ARBITRAGE TAB -->
     <section class="tab-section active" id="tab-arbitrage">
       <div class="page-header">
@@ -48,19 +68,6 @@
       </div>
 
       <div class="controls-bar">
-        <div class="control-group">
-          <label>Монета</label>
-          <select id="coin-select">
-            <option value="BTC">BTC/USDT</option>
-            <option value="ETH">ETH/USDT</option>
-            <option value="SOL">SOL/USDT</option>
-            <option value="BNB">BNB/USDT</option>
-            <option value="XRP">XRP/USDT</option>
-            <option value="DOGE">DOGE/USDT</option>
-            <option value="ADA">ADA/USDT</option>
-            <option value="AVAX">AVAX/USDT</option>
-          </select>
-        </div>
         <div class="control-group">
           <label>Мин. спред</label>
           <select id="spread-filter">
@@ -141,19 +148,6 @@
       </div>
 
       <div class="controls-bar">
-        <div class="control-group">
-          <label>Монета (CoinGecko ID)</label>
-          <select id="scam-coin-select">
-            <option value="bitcoin">Bitcoin (BTC)</option>
-            <option value="ethereum">Ethereum (ETH)</option>
-            <option value="solana">Solana (SOL)</option>
-            <option value="dogecoin">Dogecoin (DOGE)</option>
-            <option value="shiba-inu">Shiba Inu (SHIB)</option>
-            <option value="pepe">Pepe (PEPE)</option>
-            <option value="floki">Floki (FLOKI)</option>
-            <option value="bonk">Bonk (BONK)</option>
-          </select>
-        </div>
         <div class="control-group">
           <label>Период</label>
           <select id="scam-days">
