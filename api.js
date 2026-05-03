@@ -1,8 +1,29 @@
 // api.js — Real exchange data fetcher with CORS proxy
+//
+// Proxy strategy:
+//   1. Same-origin /api/proxy serverless function (Vercel) — primary.
+//      Hosted alongside the site, no rate limits, allowlisted to known
+//      crypto API hosts. This is the only proxy we control.
+//   2. corsproxy.io — public fallback (occasionally rate-limited).
+//   3. api.allorigins.win — last-resort public fallback (slow, sometimes
+//      geo-blocked, returns the body inside { contents }).
+//
+// The same-origin proxy is skipped automatically when the site is opened
+// from `file://` or any non-http(s) origin (e.g. local development off a
+// static file), so the dashboard still works in dev without needing the
+// serverless runtime.
 
 const API = (() => {
 
+  const sameOriginProxyAvailable = (() => {
+    try { return typeof location !== 'undefined' && /^https?:$/.test(location.protocol); }
+    catch { return false; }
+  })();
+
   const PROXIES = [
+    ...(sameOriginProxyAvailable
+      ? [url => `/api/proxy?url=${encodeURIComponent(url)}`]
+      : []),
     url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
     url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
   ];
@@ -14,7 +35,10 @@ const API = (() => {
         const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
         if (!res.ok) continue;
         const json = await res.json();
-        if (json.contents) return JSON.parse(json.contents);
+        if (json && typeof json === 'object' && 'contents' in json && typeof json.contents === 'string') {
+          // allorigins wraps the upstream body in { contents: "..." }.
+          return JSON.parse(json.contents);
+        }
         return json;
       } catch (e) {
         console.warn('Proxy failed, trying next...', e.message);
