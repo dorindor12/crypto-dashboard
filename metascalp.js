@@ -285,11 +285,196 @@
     return ws;
   }
 
+  // BingX spot — gzip-compressed JSON frames. Subscribes via reqType=sub on
+  // dataType=<SYM>@depth20 and <SYM>@trade. Server sends "Ping" (gzipped),
+  // we reply with literal "Pong". BingX uses dash-delimited symbols, so
+  // "BTCUSDT" becomes "BTC-USDT".
+  function bingxSymbol(sym) {
+    if (sym.endsWith('USDT')) return sym.slice(0, -4) + '-USDT';
+    if (sym.endsWith('USDC')) return sym.slice(0, -4) + '-USDC';
+    return sym;
+  }
+  function connectBingx(symbol, handlers) {
+    if (typeof pako === 'undefined') {
+      throw new Error('pako library failed to load — нужен интернет до cdn.jsdelivr.net');
+    }
+    const bxSym = bingxSymbol(symbol);
+    const url = 'wss://open-api-ws.bingx.com/market';
+    const ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    let nextId = 1;
+    const send = (obj) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+    };
+    ws.onopen = () => {
+      send({ id: 'sub-' + nextId++, reqType: 'sub', dataType: bxSym + '@depth20' });
+      send({ id: 'sub-' + nextId++, reqType: 'sub', dataType: bxSym + '@trade' });
+      handlers.onOpen();
+    };
+    ws.onmessage = (ev) => {
+      // Frames are always gzip-compressed (binary). Inflate to a string.
+      let text;
+      try {
+        const buf = new Uint8Array(ev.data);
+        text = pako.inflate(buf, { to: 'string' });
+      } catch (e) {
+        return;
+      }
+      // Server keep-alive: it sends literal "Ping" (gzipped); we answer "Pong".
+      if (text === 'Ping') { ws.send('Pong'); return; }
+      let msg;
+      try { msg = JSON.parse(text); } catch (_) { return; }
+      if (!msg.dataType || !msg.data) return;
+      if (msg.dataType.endsWith('@depth20') || msg.dataType.endsWith('@depth100') || msg.dataType.endsWith('@depth50')) {
+        // Snapshot frame: { bids: [[p,q]...], asks: [...] }
+        const bids = msg.data.bids || [];
+        const asks = msg.data.asks || [];
+        if (bids.length || asks.length) handlers.onSnapshot(bids, asks);
+      } else if (msg.dataType.endsWith('@trade')) {
+        const t = msg.data;
+        // m=true → buyer is maker → SELL aggressor (Binance convention).
+        handlers.onTrade({
+          ts: +t.T || +t.E || Date.now(),
+          price: +t.p,
+          qty: +t.q,
+          side: t.m ? 'sell' : 'buy',
+        });
+      }
+    };
+    ws.onerror = (e) => handlers.onError(e);
+    ws.onclose = (ev) => handlers.onClose(ev);
+    return ws;
+  }
+
+  // MEXC spot v3 — protobuf push. We subscribe to:
+  //   spot@public.limit.depth.v3.api.pb@<SYMBOL>@20  (top-20 snapshot)
+  //   spot@public.aggre.deals.v3.api.pb@10ms@<SYMBOL>  (aggregated trades)
+  // Each frame is a binary PushDataV3ApiWrapper. Schema is defined inline
+  // below — only the fields we actually consume are described (protobuf wire
+  // format permits dropping unused fields).
+  const MEXC_PROTO_SCHEMA = `
+    syntax = "proto3";
+
+    message PushDataV3ApiWrapper {
+      string channel = 1;
+      PublicDealsV3Api publicDeals = 301;
+      PublicLimitDepthsV3Api publicLimitDepths = 303;
+      PublicAggreDealsV3Api publicAggreDeals = 314;
+      string symbol = 3;
+      int64 sendTime = 6;
+    }
+
+    message PublicLimitDepthsV3Api {
+      repeated PublicLimitDepthV3ApiItem asks = 1;
+      repeated PublicLimitDepthV3ApiItem bids = 2;
+      string eventType = 3;
+      string version = 4;
+    }
+    message PublicLimitDepthV3ApiItem {
+      string price = 1;
+      string quantity = 2;
+    }
+
+    message PublicDealsV3Api {
+      repeated PublicDealsV3ApiItem deals = 1;
+      string eventType = 2;
+    }
+    message PublicDealsV3ApiItem {
+      string price = 1;
+      string quantity = 2;
+      int32 tradeType = 3;
+      int64 time = 4;
+    }
+
+    message PublicAggreDealsV3Api {
+      repeated PublicAggreDealsV3ApiItem deals = 1;
+      string eventType = 2;
+    }
+    message PublicAggreDealsV3ApiItem {
+      string price = 1;
+      string quantity = 2;
+      int32 tradeType = 3;
+      int64 time = 4;
+    }
+  `;
+  let mexcWrapperType = null;
+  function getMexcType() {
+    if (mexcWrapperType) return mexcWrapperType;
+    if (typeof protobuf === 'undefined') {
+      throw new Error('protobufjs library failed to load — нужен интернет до cdn.jsdelivr.net');
+    }
+    const root = protobuf.parse(MEXC_PROTO_SCHEMA, { keepCase: true }).root;
+    mexcWrapperType = root.lookupType('PushDataV3ApiWrapper');
+    return mexcWrapperType;
+  }
+  function connectMexc(symbol, handlers) {
+    const type = getMexcType();
+    const url = 'wss://wbs-api.mexc.com/ws';
+    const depthTopic = `spot@public.limit.depth.v3.api.pb@${symbol}@20`;
+    const tradesTopic = `spot@public.aggre.deals.v3.api.pb@10ms@${symbol}`;
+    const ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    let pingTimer = null;
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ method: 'SUBSCRIPTION', params: [depthTopic, tradesTopic] }));
+      pingTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ method: 'PING' }));
+      }, 20000);
+      handlers.onOpen();
+    };
+    ws.onmessage = (ev) => {
+      // Subscription ack and PONG come back as JSON text.
+      if (typeof ev.data === 'string') {
+        // Quietly ignore acks/pongs.
+        return;
+      }
+      let msg;
+      try {
+        msg = type.decode(new Uint8Array(ev.data));
+      } catch (e) {
+        return;
+      }
+      const ch = msg.channel || '';
+      if (ch.startsWith('spot@public.limit.depth') && msg.publicLimitDepths) {
+        const d = msg.publicLimitDepths;
+        const bids = (d.bids || []).map(it => [it.price, it.quantity]);
+        const asks = (d.asks || []).map(it => [it.price, it.quantity]);
+        if (bids.length || asks.length) handlers.onSnapshot(bids, asks);
+      } else if (ch.startsWith('spot@public.aggre.deals') && msg.publicAggreDeals) {
+        for (const t of (msg.publicAggreDeals.deals || [])) {
+          // tradeType: 1 = buy aggressor, 2 = sell aggressor.
+          const tt = +t.tradeType;
+          handlers.onTrade({
+            ts: +t.time || Date.now(),
+            price: +t.price,
+            qty: +t.quantity,
+            side: tt === 1 ? 'buy' : 'sell',
+          });
+        }
+      } else if (ch.startsWith('spot@public.deals') && msg.publicDeals) {
+        for (const t of (msg.publicDeals.deals || [])) {
+          const tt = +t.tradeType;
+          handlers.onTrade({
+            ts: +t.time || Date.now(),
+            price: +t.price,
+            qty: +t.quantity,
+            side: tt === 1 ? 'buy' : 'sell',
+          });
+        }
+      }
+    };
+    ws.onerror = (e) => handlers.onError(e);
+    ws.onclose = (ev) => { if (pingTimer) clearInterval(pingTimer); handlers.onClose(ev); };
+    return ws;
+  }
+
   function connectExchange(exchange, symbol, handlers) {
     if (exchange === 'binance') return connectBinance(symbol, handlers);
     if (exchange === 'bybit')   return connectBybit(symbol, handlers);
     if (exchange === 'okx')     return connectOkx(symbol, handlers);
     if (exchange === 'bitget')  return connectBitget(symbol, handlers);
+    if (exchange === 'mexc')    return connectMexc(symbol, handlers);
+    if (exchange === 'bingx')   return connectBingx(symbol, handlers);
     throw new Error('Unsupported exchange: ' + exchange);
   }
 
