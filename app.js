@@ -7,6 +7,19 @@ let scamPriceChartInst = null;
 let scamVolChartInst = null;
 let autoRefreshTimer = null;
 
+// Currently selected coin for each tab.
+let arbSelectedSymbol = 'BTC';
+let scamSelectedCoinId = 'bitcoin';
+
+// Monotonically increasing request id — used so that responses from stale
+// (in-flight) fetches don't overwrite results from the most recent fetch.
+let arbRequestId = 0;
+
+// Top coins universe (loaded once from CoinGecko at startup).
+let topCoins = [];
+let topCoinsBySymbol = [];   // deduped by symbol — used for the arbitrage tab
+
+
 // ─── TABS ─────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -48,19 +61,34 @@ function setConnected(ok, msg) {
 
 // ─── ARBITRAGE ────────────────────────────────────────────────────────────────
 async function fetchAll() {
-  const symbol = document.getElementById('coin-select').value;
+  const symbol = arbSelectedSymbol;
   const tbody = document.getElementById('arb-tbody');
-  tbody.innerHTML = '<tr><td colspan="6" class="loading-cell">Загружаем данные с бирж...</td></tr>';
+  if (!symbol) {
+    tbody.innerHTML = '<tr><td colspan="6" class="loading-cell">Выберите монету</td></tr>';
+    return;
+  }
+  // Bump the request id; ignore any responses that arrive after a newer
+  // request has been kicked off (prevents auto-refresh from clobbering a
+  // freshly-clicked coin's data).
+  const reqId = ++arbRequestId;
+  // Only show the spinner when we have nothing for this symbol yet — keeps
+  // the table populated while a refresh is in flight.
+  if (!tbody.dataset.symbol || tbody.dataset.symbol !== symbol) {
+    tbody.innerHTML = '<tr><td colspan="6" class="loading-cell">Загружаем данные с бирж...</td></tr>';
+  }
 
   document.getElementById('arb-signal').className = 'signal-box hidden';
 
   try {
     const results = await API.getAllPrices(symbol);
+    if (reqId !== arbRequestId) return;          // stale response — discard
     if (results.length === 0) throw new Error('Нет данных');
 
     setConnected(true);
     renderArbTable(results, symbol);
+    tbody.dataset.symbol = symbol;
   } catch (e) {
+    if (reqId !== arbRequestId) return;
     setConnected(false, 'Ошибка API');
     tbody.innerHTML = `<tr><td colspan="6" class="loading-cell error-msg">
       Ошибка загрузки: ${e.message}.<br>
@@ -188,8 +216,9 @@ function updateSpreadChart() {
 
 // ─── SCAM PATTERN ────────────────────────────────────────────────────────────
 async function fetchScamData() {
-  const coinId = document.getElementById('scam-coin-select').value;
+  const coinId = scamSelectedCoinId;
   const days = parseInt(document.getElementById('scam-days').value);
+  if (!coinId) return;
 
   document.getElementById('sm-cycles').textContent = '...';
   document.getElementById('sm-maxpump').textContent = '...';
@@ -435,13 +464,192 @@ function startAutoRefresh() {
   }, 30000); // every 30 seconds
 }
 
+// ─── COIN SELECTOR (searchable combobox) ─────────────────────────────────────
+//
+// Pulls top-N coins by market cap from CoinGecko once at startup, then wires up
+// two searchable comboboxes (Arbitrage tab — symbol-based; Scam tab — coingecko
+// id-based). Each combobox supports type-to-filter, click-to-select, keyboard
+// navigation (↑/↓/Enter/Esc) and an open-on-focus dropdown.
+
+function renderCoinList(listEl, items, query, activeIdx) {
+  if (!items.length) {
+    listEl.innerHTML = '<div class="combo-empty">Ничего не найдено</div>';
+    return;
+  }
+  // Cap rendered rows for performance — full list is several hundred coins.
+  const slice = items.slice(0, 80);
+  listEl.innerHTML = slice.map((c, i) => `
+    <div class="combo-item${i === activeIdx ? ' active' : ''}" data-idx="${i}">
+      <img src="${c.image || ''}" alt="" onerror="this.style.visibility='hidden'"/>
+      <span class="ci-symbol">${c.symbol}</span>
+      <span class="ci-name">${c.name}</span>
+      <span class="ci-rank">${c.rank ? '#' + c.rank : ''}</span>
+    </div>
+  `).join('');
+}
+
+function attachCombo({ inputId, listId, getItems, displayFor, onSelect, initialValue }) {
+  const input = document.getElementById(inputId);
+  const list = document.getElementById(listId);
+  let filtered = [];
+  let activeIdx = 0;
+  // When the user focuses an input that already shows a selection like
+  // "BTC — Bitcoin", we want to show the full list rather than filter by that
+  // display string. Once the user actually types, switch to filter mode.
+  let searchActive = false;
+
+  function filter(query) {
+    const q = (query || '').trim().toLowerCase();
+    const all = getItems();
+    if (!q) return all.slice();
+    return all.filter(c =>
+      c.symbol.toLowerCase().includes(q) ||
+      c.name.toLowerCase().includes(q) ||
+      (c.id && c.id.toLowerCase().includes(q))
+    );
+  }
+
+  function open() {
+    filtered = searchActive ? filter(input.value) : getItems().slice();
+    activeIdx = 0;
+    renderCoinList(list, filtered, input.value, activeIdx);
+    list.hidden = false;
+  }
+
+  function close() {
+    list.hidden = true;
+  }
+
+  function commit(item) {
+    if (!item) return;
+    input.value = displayFor(item);
+    searchActive = false;
+    onSelect(item);
+    close();
+  }
+
+  input.addEventListener('focus', () => {
+    searchActive = false;
+    input.select();
+    open();
+  });
+  input.addEventListener('input', () => {
+    searchActive = true;
+    filtered = filter(input.value);
+    activeIdx = 0;
+    renderCoinList(list, filtered, input.value, activeIdx);
+    list.hidden = false;
+  });
+  input.addEventListener('keydown', (e) => {
+    if (list.hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      open();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      activeIdx = Math.min(activeIdx + 1, Math.min(filtered.length, 80) - 1);
+      renderCoinList(list, filtered, input.value, activeIdx);
+      const el = list.querySelector('.combo-item.active');
+      if (el) el.scrollIntoView({ block: 'nearest' });
+      e.preventDefault();
+    } else if (e.key === 'ArrowUp') {
+      activeIdx = Math.max(activeIdx - 1, 0);
+      renderCoinList(list, filtered, input.value, activeIdx);
+      const el = list.querySelector('.combo-item.active');
+      if (el) el.scrollIntoView({ block: 'nearest' });
+      e.preventDefault();
+    } else if (e.key === 'Enter') {
+      if (filtered[activeIdx]) commit(filtered[activeIdx]);
+      e.preventDefault();
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+  list.addEventListener('mousedown', (e) => {
+    // Use mousedown so it fires before input blur clears the list.
+    const row = e.target.closest('.combo-item');
+    if (!row) return;
+    const idx = parseInt(row.dataset.idx, 10);
+    commit(filtered[idx]);
+  });
+  input.addEventListener('blur', () => setTimeout(close, 120));
+
+  // Display the initial selection without firing onSelect — the caller is
+  // responsible for triggering any initial fetch on the active tab.
+  if (initialValue) {
+    const all = getItems();
+    const found = all.find(c => c.id === initialValue || c.symbol === initialValue);
+    if (found) input.value = displayFor(found);
+    else input.value = initialValue;
+  }
+  input.disabled = false;
+  input.placeholder = 'Поиск: BTC, Pepe, sol...';
+}
+
+async function initCoinUniverse() {
+  // Sensible fallback list so the UI is usable even if CoinGecko / proxies are
+  // temporarily unreachable.
+  const FALLBACK = [
+    { id: 'bitcoin',  symbol: 'BTC',  name: 'Bitcoin',  rank: 1 },
+    { id: 'ethereum', symbol: 'ETH',  name: 'Ethereum', rank: 2 },
+    { id: 'tether',   symbol: 'USDT', name: 'Tether',   rank: 3 },
+    { id: 'solana',   symbol: 'SOL',  name: 'Solana',   rank: 5 },
+    { id: 'binancecoin', symbol: 'BNB', name: 'BNB',    rank: 4 },
+    { id: 'ripple',   symbol: 'XRP',  name: 'XRP',      rank: 6 },
+    { id: 'dogecoin', symbol: 'DOGE', name: 'Dogecoin', rank: 8 },
+    { id: 'cardano',  symbol: 'ADA',  name: 'Cardano',  rank: 9 },
+    { id: 'avalanche-2', symbol: 'AVAX', name: 'Avalanche', rank: 12 },
+  ];
+
+  try {
+    topCoins = await API.getTopCoins(500);
+  } catch (e) {
+    console.warn('Failed to load top coins, using fallback:', e.message);
+    topCoins = FALLBACK;
+  }
+  // For the arbitrage tab the exchange API only takes a SYMBOL (e.g. BTC),
+  // so dedupe by symbol keeping the highest-ranked coin per symbol.
+  const bySymbol = new Map();
+  for (const c of topCoins) {
+    if (!c.symbol) continue;
+    const sym = c.symbol.toUpperCase();
+    const prev = bySymbol.get(sym);
+    if (!prev || (c.rank && c.rank < prev.rank)) bySymbol.set(sym, c);
+  }
+  topCoinsBySymbol = [...bySymbol.values()].sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
+}
+
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  await initCoinUniverse();
+
+  attachCombo({
+    inputId: 'arb-coin-input',
+    listId: 'arb-coin-list',
+    getItems: () => topCoinsBySymbol,
+    displayFor: c => `${c.symbol} — ${c.name}`,
+    onSelect: c => {
+      arbSelectedSymbol = c.symbol;
+      fetchAll();
+    },
+    initialValue: 'BTC',
+  });
+
+  attachCombo({
+    inputId: 'scam-coin-input',
+    listId: 'scam-coin-list',
+    getItems: () => topCoins,
+    displayFor: c => `${c.symbol} — ${c.name}`,
+    onSelect: c => {
+      scamSelectedCoinId = c.id;
+      fetchScamData();
+    },
+    initialValue: 'bitcoin',
+  });
+
   fetchAll();
   startAutoRefresh();
 
-  document.getElementById('coin-select').addEventListener('change', fetchAll);
   document.getElementById('spread-filter').addEventListener('change', fetchAll);
-  document.getElementById('scam-coin-select').addEventListener('change', fetchScamData);
   document.getElementById('scam-days').addEventListener('change', fetchScamData);
 });

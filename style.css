@@ -214,6 +214,109 @@ select:focus {
   border-color: var(--accent);
 }
 
+/* COMBOBOX (searchable coin selector) */
+.combo {
+  position: relative;
+  width: 240px;
+}
+
+.combo-input {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 8px 28px 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: var(--font);
+  outline: none;
+}
+
+.combo-input:focus {
+  border-color: var(--accent);
+}
+
+.combo-input:disabled {
+  color: var(--text3);
+  cursor: wait;
+}
+
+.combo-caret {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text3);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.combo-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  z-index: 50;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+
+.combo-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.combo-item:last-child { border-bottom: none; }
+
+.combo-item:hover,
+.combo-item.active {
+  background: var(--bg3);
+}
+
+.combo-item img {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.combo-item .ci-symbol {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text);
+  min-width: 60px;
+}
+
+.combo-item .ci-name {
+  color: var(--text2);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combo-item .ci-rank {
+  color: var(--text3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.combo-empty {
+  padding: 14px;
+  text-align: center;
+  color: var(--text3);
+  font-size: 12px;
+}
+
 .refresh-btn {
   padding: 8px 18px;
   background: rgba(91,138,240,0.12);

@@ -50,16 +50,12 @@
       <div class="controls-bar">
         <div class="control-group">
           <label>Монета</label>
-          <select id="coin-select">
-            <option value="BTC">BTC/USDT</option>
-            <option value="ETH">ETH/USDT</option>
-            <option value="SOL">SOL/USDT</option>
-            <option value="BNB">BNB/USDT</option>
-            <option value="XRP">XRP/USDT</option>
-            <option value="DOGE">DOGE/USDT</option>
-            <option value="ADA">ADA/USDT</option>
-            <option value="AVAX">AVAX/USDT</option>
-          </select>
+          <div class="combo" id="arb-coin-combo">
+            <input type="text" class="combo-input" id="arb-coin-input"
+                   placeholder="Загружаем монеты..." autocomplete="off" disabled/>
+            <span class="combo-caret">▾</span>
+            <div class="combo-list" id="arb-coin-list" hidden></div>
+          </div>
         </div>
         <div class="control-group">
           <label>Мин. спред</label>
@@ -142,17 +138,13 @@
 
       <div class="controls-bar">
         <div class="control-group">
-          <label>Монета (CoinGecko ID)</label>
-          <select id="scam-coin-select">
-            <option value="bitcoin">Bitcoin (BTC)</option>
-            <option value="ethereum">Ethereum (ETH)</option>
-            <option value="solana">Solana (SOL)</option>
-            <option value="dogecoin">Dogecoin (DOGE)</option>
-            <option value="shiba-inu">Shiba Inu (SHIB)</option>
-            <option value="pepe">Pepe (PEPE)</option>
-            <option value="floki">Floki (FLOKI)</option>
-            <option value="bonk">Bonk (BONK)</option>
-          </select>
+          <label>Монета</label>
+          <div class="combo" id="scam-coin-combo">
+            <input type="text" class="combo-input" id="scam-coin-input"
+                   placeholder="Загружаем монеты..." autocomplete="off" disabled/>
+            <span class="combo-caret">▾</span>
+            <div class="combo-list" id="scam-coin-list" hidden></div>
+          </div>
         </div>
         <div class="control-group">
           <label>Период</label>
