@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="style.css"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <div class="layout">
@@ -315,7 +316,12 @@
             <h2 id="scalp-modal-title">—</h2>
             <span class="modal-exchange" id="scalp-modal-exchange">—</span>
           </div>
-          <button class="modal-close" id="scalp-modal-close" aria-label="Закрыть">✕</button>
+          <div class="modal-header-actions">
+            <a class="modal-tv-btn" id="scalp-modal-tv" href="#" target="_blank" rel="noopener noreferrer" title="Открыть в TradingView">
+              <span class="tv-icon">📈</span> TradingView
+            </a>
+            <button class="modal-close" id="scalp-modal-close" aria-label="Закрыть">✕</button>
+          </div>
         </header>
         <div class="modal-body">
           <div class="modal-stats">
@@ -331,8 +337,8 @@
             <button class="modal-tab" data-tf="5m">5 мин</button>
             <button class="modal-tab" data-tf="15m">15 мин</button>
           </div>
-          <div class="chart-wrap" style="height:340px;">
-            <canvas id="scalpDetailChart"></canvas>
+          <div class="chart-wrap scalp-detail-chart-wrap">
+            <div id="scalpDetailChart" class="scalp-detail-chart"></div>
           </div>
           <div class="modal-tf-stats" id="scalp-modal-tf-stats"></div>
         </div>

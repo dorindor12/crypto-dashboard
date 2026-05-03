@@ -914,8 +914,9 @@ function renderScalpGrid(items) {
   });
 }
 
-// Lightweight pure-canvas sparkline: close-price line + horizontal range
-// markers (no Chart.js — keeps each card cheap to render).
+// Pure-canvas mini candlestick sparkline. Each kline drawn as a green/red
+// candle: thin wick (h–l) + filled body (o–c). Dashed range guidelines on top.
+// Keeps each card cheap to render — no library needed for 47 mini charts.
 function drawSparkline(canvas, klines, stats) {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -927,36 +928,53 @@ function drawSparkline(canvas, klines, stats) {
 
   const pad = 4;
   const xs = w - pad * 2, ys = h - pad * 2;
-  const min = stats.low, max = stats.high, range = max - min || 1;
+  // Use absolute high/low across the window so wicks fit.
+  let min = Infinity, max = -Infinity;
+  for (const k of klines) {
+    if (k.l < min) min = k.l;
+    if (k.h > max) max = k.h;
+  }
+  if (!isFinite(min) || !isFinite(max)) { min = stats.low; max = stats.high; }
+  const range = (max - min) || (max * 0.0001) || 1;
   const n = klines.length;
 
-  // Range high/low guidelines.
-  ctx.strokeStyle = 'rgba(29,158,117,0.45)';
+  // Range high/low guidelines (top + bottom of usable area).
+  const hiY = pad + ys - ((stats.high - min) / range) * ys;
+  const loY = pad + ys - ((stats.low - min) / range) * ys;
   ctx.setLineDash([3, 3]);
   ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(pad, pad);
-  ctx.lineTo(pad + xs, pad);
-  ctx.stroke();
-
+  ctx.strokeStyle = 'rgba(29,158,117,0.45)';
+  ctx.beginPath(); ctx.moveTo(pad, hiY); ctx.lineTo(pad + xs, hiY); ctx.stroke();
   ctx.strokeStyle = 'rgba(216,90,48,0.45)';
-  ctx.beginPath();
-  ctx.moveTo(pad, pad + ys);
-  ctx.lineTo(pad + xs, pad + ys);
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad, loY); ctx.lineTo(pad + xs, loY); ctx.stroke();
   ctx.setLineDash([]);
 
-  // Close-price line.
-  ctx.strokeStyle = '#5B8AF0';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
+  // Candles. Allocate at least 1px between candles.
+  const slot = xs / n;
+  const bodyW = Math.max(1, Math.floor(slot * 0.65));
+  const upColor = '#1d9e75', downColor = '#d85a30';
   for (let i = 0; i < n; i++) {
-    const x = pad + (n > 1 ? (i / (n - 1)) * xs : xs / 2);
-    const y = pad + ys - ((klines[i].c - min) / range) * ys;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    const k = klines[i];
+    const cx = pad + (i + 0.5) * slot;
+    const yH = pad + ys - ((k.h - min) / range) * ys;
+    const yL = pad + ys - ((k.l - min) / range) * ys;
+    const yO = pad + ys - ((k.o - min) / range) * ys;
+    const yC = pad + ys - ((k.c - min) / range) * ys;
+    const up = k.c >= k.o;
+    const color = up ? upColor : downColor;
+    // Wick.
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(cx) + 0.5, yH);
+    ctx.lineTo(Math.round(cx) + 0.5, yL);
+    ctx.stroke();
+    // Body.
+    const bodyTop = Math.min(yO, yC);
+    const bodyH = Math.max(1, Math.abs(yC - yO));
+    ctx.fillStyle = color;
+    ctx.fillRect(Math.round(cx - bodyW / 2), Math.round(bodyTop), bodyW, Math.round(bodyH));
   }
-  ctx.stroke();
 }
 
 // ─── SCALP DETAIL MODAL ─────────────────────────────────────────────────────
@@ -977,6 +995,10 @@ async function openScalpDetail(item) {
   document.getElementById('scalp-modal-score').textContent = item.stats.score.toFixed(1);
   document.getElementById('scalp-modal-vol24').textContent = fmtVol(item.pair.volume24h);
 
+  // TradingView deep link.
+  const tvBtn = document.getElementById('scalp-modal-tv');
+  if (tvBtn) tvBtn.href = tradingViewUrl(item.exchange, item.symbol);
+
   // Reset tab state.
   document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
   document.querySelector('.modal-tab[data-tf="1m"]').classList.add('active');
@@ -987,75 +1009,124 @@ async function openScalpDetail(item) {
 }
 
 async function renderScalpDetailChart(item, tf) {
-  const canvas = document.getElementById('scalpDetailChart');
-  const ctx = canvas.getContext('2d');
-  if (scalpDetailChartInst) { scalpDetailChartInst.destroy(); scalpDetailChartInst = null; }
+  const container = document.getElementById('scalpDetailChart');
+  destroyScalpDetailChart();
+
+  // Spinner while we (possibly) fetch a different timeframe.
+  container.innerHTML = '<div class="chart-loading">Загружаю свечи…</div>';
 
   let klines;
   try {
-    // For non-1m we fetch fresh — could cache, but klines are cheap (~1 call).
     klines = tf === '1m' ? item.klines : await API.getKlines(item.exchange, item.symbol, tf, 60);
   } catch (e) {
     klines = item.klines;
   }
+  container.innerHTML = '';
 
-  const labels = klines.map(k => new Date(k.t));
-  const closes = klines.map(k => k.c);
+  if (typeof LightweightCharts === 'undefined') {
+    container.innerHTML = '<div class="chart-loading">График недоступен (LightweightCharts не загружен)</div>';
+    return;
+  }
 
-  scalpDetailChartInst = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Цена',
-          data: closes,
-          borderColor: '#5B8AF0',
-          backgroundColor: 'rgba(91,138,240,0.1)',
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.15,
-          fill: true,
-        },
-        {
-          label: 'High диапазона',
-          data: klines.map(() => item.stats.high),
-          borderColor: 'rgba(29,158,117,0.55)',
-          borderWidth: 1,
-          borderDash: [4, 4],
-          pointRadius: 0,
-          fill: false,
-        },
-        {
-          label: 'Low диапазона',
-          data: klines.map(() => item.stats.low),
-          borderColor: 'rgba(216,90,48,0.55)',
-          borderWidth: 1,
-          borderDash: [4, 4],
-          pointRadius: 0,
-          fill: false,
-        },
-      ],
+  const chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: container.clientHeight,
+    layout: {
+      background: { type: 'solid', color: 'transparent' },
+      textColor: '#8b90a0',
+      fontFamily: 'inherit',
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: c => c.dataset.label + ': ' + fmtPrice(c.raw),
-          },
-        },
-      },
-      scales: {
-        x: { type: 'time', time: { tooltipFormat: 'HH:mm' }, ticks: { color: '#8b90a0', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#8b90a0', callback: v => fmtPrice(v) }, grid: { color: 'rgba(255,255,255,0.04)' } },
-      },
+    grid: {
+      vertLines: { color: 'rgba(255,255,255,0.04)' },
+      horzLines: { color: 'rgba(255,255,255,0.04)' },
     },
+    rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
+    timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true, secondsVisible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
+
+  // Compute price precision based on coin price magnitude.
+  const refPrice = klines.length ? klines[klines.length - 1].c : item.pair.price;
+  const precision = refPrice >= 1000 ? 2 : refPrice >= 1 ? 4 : refPrice >= 0.01 ? 5 : 7;
+
+  const candleSeries = chart.addCandlestickSeries({
+    upColor: '#1d9e75',
+    downColor: '#d85a30',
+    borderUpColor: '#1d9e75',
+    borderDownColor: '#d85a30',
+    wickUpColor: '#1d9e75',
+    wickDownColor: '#d85a30',
+    priceFormat: { type: 'price', precision, minMove: 1 / Math.pow(10, precision) },
+  });
+  candleSeries.setData(klines.map(k => ({
+    time: Math.floor(k.t / 1000),
+    open: k.o,
+    high: k.h,
+    low: k.l,
+    close: k.c,
+  })));
+
+  // High/Low range guidelines drawn from the 1m stats (consistent across tabs).
+  candleSeries.createPriceLine({
+    price: item.stats.high,
+    color: 'rgba(29,158,117,0.7)',
+    lineWidth: 1,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    axisLabelVisible: true,
+    title: 'High',
+  });
+  candleSeries.createPriceLine({
+    price: item.stats.low,
+    color: 'rgba(216,90,48,0.7)',
+    lineWidth: 1,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    axisLabelVisible: true,
+    title: 'Low',
+  });
+
+  // Volume histogram on its own scale (overlay at bottom).
+  const volSeries = chart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'volume',
+    color: 'rgba(91,138,240,0.5)',
+  });
+  chart.priceScale('volume').applyOptions({
+    scaleMargins: { top: 0.82, bottom: 0 },
+  });
+  volSeries.setData(klines.map(k => ({
+    time: Math.floor(k.t / 1000),
+    value: k.qv || (k.v * k.c) || 0,
+    color: k.c >= k.o ? 'rgba(29,158,117,0.45)' : 'rgba(216,90,48,0.45)',
+  })));
+
+  chart.timeScale().fitContent();
+
+  // Resize observer so the chart stays full-width when modal layout shifts.
+  const ro = new ResizeObserver(entries => {
+    for (const e of entries) {
+      const cr = e.contentRect;
+      chart.applyOptions({ width: cr.width, height: cr.height });
+    }
+  });
+  ro.observe(container);
+
+  scalpDetailChartInst = { chart, ro, container };
+}
+
+function destroyScalpDetailChart() {
+  if (!scalpDetailChartInst) return;
+  try { scalpDetailChartInst.ro.disconnect(); } catch (_) {}
+  try { scalpDetailChartInst.chart.remove(); } catch (_) {}
+  scalpDetailChartInst = null;
+}
+
+// Map our exchange ids to TradingView exchange prefixes.
+function tradingViewSymbol(exchange, symbol) {
+  const ex = { mexc: 'MEXC', bingx: 'BINGX', bitget: 'BITGET' }[exchange] || exchange.toUpperCase();
+  return `${ex}:${symbol}USDT`;
+}
+function tradingViewUrl(exchange, symbol) {
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tradingViewSymbol(exchange, symbol))}`;
 }
 
 function renderScalpDetailTfStats(klines1m) {
@@ -1088,21 +1159,16 @@ function initScalpScanner() {
 
   // Modal close handlers.
   const modal = document.getElementById('scalp-modal');
-  document.getElementById('scalp-modal-close').addEventListener('click', () => {
+  const closeModal = () => {
     modal.hidden = true;
-    if (scalpDetailChartInst) { scalpDetailChartInst.destroy(); scalpDetailChartInst = null; }
-  });
+    destroyScalpDetailChart();
+  };
+  document.getElementById('scalp-modal-close').addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
-      modal.hidden = true;
-      if (scalpDetailChartInst) { scalpDetailChartInst.destroy(); scalpDetailChartInst = null; }
-    }
+    if (e.target === modal) closeModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !modal.hidden) {
-      modal.hidden = true;
-      if (scalpDetailChartInst) { scalpDetailChartInst.destroy(); scalpDetailChartInst = null; }
-    }
+    if (e.key === 'Escape' && !modal.hidden) closeModal();
   });
 
   // Modal timeframe tabs.
