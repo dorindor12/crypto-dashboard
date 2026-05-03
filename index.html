@@ -40,6 +40,26 @@
   <!-- MAIN -->
   <main class="main">
 
+    <!-- TOPBAR — global coin search -->
+    <div class="topbar">
+      <div class="topbar-search" id="topbar-search">
+        <span class="topbar-search-icon" aria-hidden="true">⌕</span>
+        <input type="text" class="topbar-search-input" id="global-coin-input"
+               placeholder="Загружаем монеты..." autocomplete="off"
+               aria-label="Поиск монеты" disabled/>
+        <kbd class="topbar-search-kbd">/</kbd>
+        <div class="combo-list topbar-search-list" id="global-coin-list" hidden></div>
+      </div>
+      <div class="topbar-selected" id="topbar-selected" hidden>
+        <img class="topbar-selected-img" alt=""/>
+        <div class="topbar-selected-meta">
+          <div class="topbar-selected-symbol"></div>
+          <div class="topbar-selected-name"></div>
+        </div>
+        <div class="topbar-selected-rank"></div>
+      </div>
+    </div>
+
     <!-- ARBITRAGE TAB -->
     <section class="tab-section active" id="tab-arbitrage">
       <div class="page-header">
@@ -48,15 +68,6 @@
       </div>
 
       <div class="controls-bar">
-        <div class="control-group">
-          <label>Монета</label>
-          <div class="combo" id="arb-coin-combo">
-            <input type="text" class="combo-input" id="arb-coin-input"
-                   placeholder="Загружаем монеты..." autocomplete="off" disabled/>
-            <span class="combo-caret">▾</span>
-            <div class="combo-list" id="arb-coin-list" hidden></div>
-          </div>
-        </div>
         <div class="control-group">
           <label>Мин. спред</label>
           <select id="spread-filter">
@@ -137,15 +148,6 @@
       </div>
 
       <div class="controls-bar">
-        <div class="control-group">
-          <label>Монета</label>
-          <div class="combo" id="scam-coin-combo">
-            <input type="text" class="combo-input" id="scam-coin-input"
-                   placeholder="Загружаем монеты..." autocomplete="off" disabled/>
-            <span class="combo-caret">▾</span>
-            <div class="combo-list" id="scam-coin-list" hidden></div>
-          </div>
-        </div>
         <div class="control-group">
           <label>Период</label>
           <select id="scam-days">

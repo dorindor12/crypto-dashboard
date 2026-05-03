@@ -619,36 +619,69 @@ async function initCoinUniverse() {
   topCoinsBySymbol = [...bySymbol.values()].sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
 }
 
+function updateSelectedCoinChip(coin) {
+  const chip = document.getElementById('topbar-selected');
+  if (!chip || !coin) return;
+  chip.hidden = false;
+  chip.querySelector('.topbar-selected-img').src = coin.image || '';
+  chip.querySelector('.topbar-selected-symbol').textContent = coin.symbol;
+  chip.querySelector('.topbar-selected-name').textContent = coin.name;
+  const rankEl = chip.querySelector('.topbar-selected-rank');
+  rankEl.textContent = coin.rank ? '#' + coin.rank : '';
+  rankEl.style.display = coin.rank ? '' : 'none';
+}
+
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 window.addEventListener('load', async () => {
   await initCoinUniverse();
 
+  // Global search drives both tabs from a single source of truth.
   attachCombo({
-    inputId: 'arb-coin-input',
-    listId: 'arb-coin-list',
-    getItems: () => topCoinsBySymbol,
-    displayFor: c => `${c.symbol} — ${c.name}`,
-    onSelect: c => {
-      arbSelectedSymbol = c.symbol;
-      fetchAll();
-    },
-    initialValue: 'BTC',
-  });
-
-  attachCombo({
-    inputId: 'scam-coin-input',
-    listId: 'scam-coin-list',
+    inputId: 'global-coin-input',
+    listId: 'global-coin-list',
     getItems: () => topCoins,
     displayFor: c => `${c.symbol} — ${c.name}`,
     onSelect: c => {
+      arbSelectedSymbol = c.symbol;
       scamSelectedCoinId = c.id;
-      fetchScamData();
+      updateSelectedCoinChip(c);
+      const activeTab = document.querySelector('.tab-section.active');
+      if (activeTab && activeTab.id === 'tab-arbitrage') fetchAll();
+      else if (activeTab && activeTab.id === 'tab-scam') fetchScamData();
     },
     initialValue: 'bitcoin',
   });
 
+  // Show the initial Bitcoin chip without firing a fetch (we trigger fetchAll
+  // explicitly below).
+  const initialCoin = topCoins.find(c => c.id === 'bitcoin') || topCoins[0];
+  if (initialCoin) {
+    arbSelectedSymbol = initialCoin.symbol;
+    scamSelectedCoinId = initialCoin.id;
+    updateSelectedCoinChip(initialCoin);
+  }
+
+  // Press "/" anywhere on the page to focus the global search.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const input = document.getElementById('global-coin-input');
+    if (!input || input.disabled) return;
+    e.preventDefault();
+    input.focus();
+  });
+
   fetchAll();
   startAutoRefresh();
+
+  // When the user switches to the scam tab for the first time, kick off a
+  // fetch for the currently-selected coin.
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.tab === 'scam') fetchScamData();
+    });
+  });
 
   document.getElementById('spread-filter').addEventListener('change', fetchAll);
   document.getElementById('scam-days').addEventListener('change', fetchScamData);

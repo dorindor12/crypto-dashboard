@@ -155,6 +155,129 @@ body {
   overflow-x: hidden;
 }
 
+/* TOPBAR — global coin search */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.topbar-search {
+  position: relative;
+  flex: 1;
+  max-width: 640px;
+}
+
+.topbar-search-icon {
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text3);
+  font-size: 20px;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.topbar-search-input {
+  width: 100%;
+  height: 52px;
+  padding: 0 56px 0 50px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 16px;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.topbar-search-input::placeholder {
+  color: var(--text3);
+}
+
+.topbar-search-input:hover {
+  background: var(--bg3);
+}
+
+.topbar-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(91, 138, 240, 0.15);
+}
+
+.topbar-search-input:disabled {
+  cursor: wait;
+  color: var(--text3);
+}
+
+.topbar-search-kbd {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text3);
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.topbar-search-list {
+  top: calc(100% + 6px);
+  max-height: 380px;
+  border-radius: 10px;
+}
+
+.topbar-selected {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px 8px 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  height: 52px;
+}
+
+.topbar-selected-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.topbar-selected-meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.topbar-selected-symbol {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.topbar-selected-name {
+  color: var(--text2);
+  font-size: 12px;
+}
+
+.topbar-selected-rank {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text3);
+  padding: 4px 8px;
+  background: var(--bg3);
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
 .page-header {
   margin-bottom: 24px;
 }
