@@ -385,5 +385,134 @@ const API = (() => {
     };
   }
 
-  return { getAllPrices, getCoinHistory, getTopCoins };
+  // ─── SCALP SCANNER (MEXC / BingX / Bitget) ─────────────────────────────────
+  //
+  // Unified klines + top-volume helpers used by the "Скальпинг" tab to find
+  // coins that are currently ranging tightly (good scalping targets).
+  //
+  // Each exchange has its own quirks:
+  //   - MEXC:   BTCUSDT,  ASC by time, intervals "1m"/"5m"/"15m".
+  //   - BingX:  BTC-USDT, DESC by time, intervals "1m"/"5m"/"15m".
+  //   - Bitget: BTCUSDT,  ASC by time, granularity "1min"/"5min"/"15min".
+  //
+  // Klines are normalized to: { t, o, h, l, c, v, qv } (qv = USDT volume).
+
+  const SCALP_EXCHANGE_META = {
+    mexc:   { label: 'MEXC',   sep: '',  intervals: { '1m': '1m',   '5m': '5m',   '15m': '15m' } },
+    bingx:  { label: 'BingX',  sep: '-', intervals: { '1m': '1m',   '5m': '5m',   '15m': '15m' } },
+    bitget: { label: 'Bitget', sep: '',  intervals: { '1m': '1min', '5m': '5min', '15m': '15min' } },
+  };
+
+  function scalpExchangeSymbol(exchange, symbol) {
+    return symbol + SCALP_EXCHANGE_META[exchange].sep + 'USDT';
+  }
+
+  function normalizeKline(arr, mapping) {
+    // mapping = ['t','o','h','l','c','v','_','qv']
+    const out = {};
+    for (let i = 0; i < mapping.length; i++) {
+      const key = mapping[i];
+      if (!key || key === '_') continue;
+      out[key] = key === 't' ? Number(arr[i]) : parseFloat(arr[i]);
+    }
+    return out;
+  }
+
+  async function getMexcKlines(symbol, interval, limit) {
+    const sym = scalpExchangeSymbol('mexc', symbol);
+    const data = await fetchWithProxy(`https://api.mexc.com/api/v3/klines?symbol=${sym}&interval=${SCALP_EXCHANGE_META.mexc.intervals[interval]}&limit=${limit}`);
+    if (!Array.isArray(data)) throw new Error('MEXC klines: bad shape');
+    // [openTime, open, high, low, close, volume, closeTime, quoteVolume]
+    return data.map(k => normalizeKline(k, ['t','o','h','l','c','v','_','qv']));
+  }
+
+  async function getBingXKlines(symbol, interval, limit) {
+    const sym = scalpExchangeSymbol('bingx', symbol);
+    const r = await fetchWithProxy(`https://open-api.bingx.com/openApi/spot/v2/market/kline?symbol=${sym}&interval=${SCALP_EXCHANGE_META.bingx.intervals[interval]}&limit=${limit}`);
+    const data = r && r.data;
+    if (!Array.isArray(data)) throw new Error('BingX klines: bad shape');
+    // [openTime, open, high, low, close, volume, closeTime, quoteVolume]  — DESC by time
+    return data
+      .map(k => normalizeKline(k, ['t','o','h','l','c','v','_','qv']))
+      .sort((a, b) => a.t - b.t);
+  }
+
+  async function getBitgetKlines(symbol, interval, limit) {
+    const sym = scalpExchangeSymbol('bitget', symbol);
+    const r = await fetchWithProxy(`https://api.bitget.com/api/v2/spot/market/candles?symbol=${sym}&granularity=${SCALP_EXCHANGE_META.bitget.intervals[interval]}&limit=${limit}`);
+    const data = r && r.data;
+    if (!Array.isArray(data)) throw new Error('Bitget klines: bad shape');
+    // [ts, o, h, l, c, baseVol, quoteVol, usdtVol]
+    return data.map(k => normalizeKline(k, ['t','o','h','l','c','v','_','qv']));
+  }
+
+  async function getKlines(exchange, symbol, interval, limit = 60) {
+    if (exchange === 'mexc')   return getMexcKlines(symbol, interval, limit);
+    if (exchange === 'bingx')  return getBingXKlines(symbol, interval, limit);
+    if (exchange === 'bitget') return getBitgetKlines(symbol, interval, limit);
+    throw new Error('Unknown exchange: ' + exchange);
+  }
+
+  async function getMexcTopVolumePairs(limit) {
+    const data = await fetchWithProxy(`https://api.mexc.com/api/v3/ticker/24hr`);
+    if (!Array.isArray(data)) throw new Error('MEXC tickers: bad shape');
+    return data
+      .filter(d => d.symbol && d.symbol.endsWith('USDT'))
+      .map(d => ({
+        symbol: d.symbol.slice(0, -4), // strip USDT
+        price: parseFloat(d.lastPrice),
+        change24h: parseFloat(d.priceChangePercent),
+        volume24h: parseFloat(d.quoteVolume),
+      }))
+      .filter(d => isFinite(d.price) && d.price > 0 && isFinite(d.volume24h))
+      .sort((a, b) => b.volume24h - a.volume24h)
+      .slice(0, limit);
+  }
+
+  async function getBingXTopVolumePairs(limit) {
+    const r = await fetchWithProxy(`https://open-api.bingx.com/openApi/spot/v1/ticker/24hr`);
+    const data = r && r.data;
+    if (!Array.isArray(data)) throw new Error('BingX tickers: bad shape');
+    return data
+      .filter(d => d.symbol && d.symbol.endsWith('-USDT'))
+      .map(d => ({
+        symbol: d.symbol.replace('-USDT', ''),
+        price: parseFloat(d.lastPrice),
+        change24h: parseFloat(String(d.priceChangePercent).replace('%', '')),
+        volume24h: parseFloat(d.quoteVolume),
+      }))
+      .filter(d => isFinite(d.price) && d.price > 0 && isFinite(d.volume24h))
+      .sort((a, b) => b.volume24h - a.volume24h)
+      .slice(0, limit);
+  }
+
+  async function getBitgetTopVolumePairs(limit) {
+    const r = await fetchWithProxy(`https://api.bitget.com/api/v2/spot/market/tickers`);
+    const data = r && r.data;
+    if (!Array.isArray(data)) throw new Error('Bitget tickers: bad shape');
+    return data
+      .filter(d => d.symbol && d.symbol.endsWith('USDT'))
+      .map(d => ({
+        symbol: d.symbol.slice(0, -4),
+        price: parseFloat(d.lastPr),
+        change24h: parseFloat(d.change24h) * 100,
+        volume24h: parseFloat(d.usdtVolume),
+      }))
+      .filter(d => isFinite(d.price) && d.price > 0 && isFinite(d.volume24h))
+      .sort((a, b) => b.volume24h - a.volume24h)
+      .slice(0, limit);
+  }
+
+  async function getTopVolumePairs(exchange, limit = 30) {
+    if (exchange === 'mexc')   return getMexcTopVolumePairs(limit);
+    if (exchange === 'bingx')  return getBingXTopVolumePairs(limit);
+    if (exchange === 'bitget') return getBitgetTopVolumePairs(limit);
+    throw new Error('Unknown exchange: ' + exchange);
+  }
+
+  return {
+    getAllPrices, getCoinHistory, getTopCoins,
+    getKlines, getTopVolumePairs,
+    SCALP_EXCHANGE_META,
+  };
 })();
