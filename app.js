@@ -685,4 +685,435 @@ window.addEventListener('load', async () => {
 
   document.getElementById('spread-filter').addEventListener('change', fetchAll);
   document.getElementById('scam-days').addEventListener('change', fetchScamData);
+
+  // ─── SCALP SCANNER WIRING ─────────────────────────────────────────────────
+  initScalpScanner();
 });
+
+// ─── SCALP SCANNER ─────────────────────────────────────────────────────────
+// Finds coins that are currently ranging tightly within a fixed band — these
+// are the best targets for buy-low / sell-high scalping (e.g. via Metascalp).
+// Focuses on MEXC, BingX and Bitget per user request.
+
+let scalpResults = [];        // last scan output
+let scalpDetailChartInst = null;
+let scalpScanInFlight = false;
+
+function getScalpExchanges() {
+  return Array.from(
+    document.querySelectorAll('.exchange-toggles input[type="checkbox"]:checked')
+  ).map(c => c.value);
+}
+
+// Compute range / touches / score from an array of normalized klines
+// ({t,o,h,l,c,v,qv}). Touches = candles whose high/low gets within 0.15% of
+// the period max/min — proxies for "price retests this level".
+function computeRangeStats(klines) {
+  if (!klines.length) return null;
+  let high = -Infinity, low = Infinity;
+  for (const k of klines) {
+    if (k.h > high) high = k.h;
+    if (k.l < low) low = k.l;
+  }
+  const mid = (high + low) / 2;
+  const rangePct = mid > 0 ? ((high - low) / mid) * 100 : 0;
+  const tol = 0.0015; // 0.15% proximity counts as a touch
+  let highTouches = 0, lowTouches = 0;
+  for (const k of klines) {
+    if (k.h >= high * (1 - tol)) highTouches++;
+    if (k.l <= low * (1 + tol)) lowTouches++;
+  }
+  // Score rewards multi-touch ranging: more bounces, tighter range = higher.
+  // Add 0.05 floor on rangePct so very-tight (~zero range) doesn't NaN.
+  const score = (highTouches + lowTouches) / Math.max(0.05, rangePct);
+  return { high, low, rangePct, highTouches, lowTouches, score };
+}
+
+// Sum quote-volume for the last N candles of a 1-min kline series.
+function sumLastNVolume(klines, n) {
+  let v = 0;
+  for (let i = Math.max(0, klines.length - n); i < klines.length; i++) {
+    v += klines[i].qv || 0;
+  }
+  return v;
+}
+
+async function runScalpScan() {
+  if (scalpScanInFlight) return;
+  scalpScanInFlight = true;
+  const t0 = performance.now();
+
+  const exchanges = getScalpExchanges();
+  const tolerance = parseFloat(document.getElementById('scalp-tolerance').value) || 1.5;
+  const lookback = parseInt(document.getElementById('scalp-lookback').value, 10) || 60;
+  const topN = parseInt(document.getElementById('scalp-topn').value, 10) || 30;
+  const minTouches = parseInt(document.getElementById('scalp-min-touches').value, 10) || 0;
+
+  const status = document.getElementById('scalp-status');
+  const grid = document.getElementById('scalp-grid');
+  const metricsRow = document.getElementById('scalp-metrics');
+  const btn = document.getElementById('scalp-scan-btn');
+
+  if (!exchanges.length) {
+    status.className = 'scalp-status error';
+    status.textContent = 'Выберите хотя бы одну биржу.';
+    scalpScanInFlight = false;
+    return;
+  }
+
+  status.className = 'scalp-status scanning';
+  status.textContent = `Получаю топ-${topN} пар по 24h-объёму с ${exchanges.map(e => e.toUpperCase()).join(', ')}...`;
+  btn.disabled = true;
+  grid.innerHTML = '';
+
+  // Step 1: fetch top-volume pairs per exchange in parallel.
+  const pairsByEx = {};
+  await Promise.all(exchanges.map(async ex => {
+    try {
+      pairsByEx[ex] = await API.getTopVolumePairs(ex, topN);
+    } catch (e) {
+      console.warn('Top-volume failed for', ex, e.message);
+      pairsByEx[ex] = [];
+    }
+  }));
+
+  let totalPairs = 0;
+  for (const ex of exchanges) totalPairs += pairsByEx[ex].length;
+
+  status.textContent = `Тяну 1m-свечи (${lookback} мин) для ${totalPairs} пар...`;
+
+  // Step 2: fetch klines for each pair (limited concurrency to avoid rate-limit).
+  const tasks = [];
+  for (const ex of exchanges) {
+    for (const p of pairsByEx[ex]) tasks.push({ ex, p });
+  }
+
+  const results = [];
+  const CONCURRENCY = 6;
+  let next = 0, done = 0;
+
+  async function worker() {
+    while (next < tasks.length) {
+      const idx = next++;
+      const { ex, p } = tasks[idx];
+      try {
+        const klines = await API.getKlines(ex, p.symbol, '1m', lookback);
+        if (klines && klines.length >= Math.min(15, lookback)) {
+          const stats = computeRangeStats(klines);
+          if (stats) {
+            results.push({
+              exchange: ex,
+              symbol: p.symbol,
+              pair: p,
+              klines,
+              stats,
+            });
+          }
+        }
+      } catch (e) {
+        // Many top-volume symbols may not exist on a given exchange's spot
+        // market or might be wrapped/unsupported — that's expected.
+      }
+      done++;
+      if (done % 5 === 0) {
+        status.textContent = `Тяну 1m-свечи: ${done}/${tasks.length}...`;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
+  // Step 3: filter ranging coins + sort by score.
+  const ranging = results.filter(r =>
+    r.stats.rangePct <= tolerance &&
+    (r.stats.highTouches + r.stats.lowTouches) >= minTouches
+  );
+  ranging.sort((a, b) => b.stats.score - a.stats.score);
+
+  scalpResults = ranging;
+
+  // Step 4: render.
+  metricsRow.hidden = false;
+  document.getElementById('sc-scanned').textContent = totalPairs;
+  document.getElementById('sc-found').textContent = ranging.length;
+  document.getElementById('sc-best').textContent = ranging.length
+    ? ranging[0].stats.score.toFixed(1)
+    : '—';
+  document.getElementById('sc-time').textContent =
+    ((performance.now() - t0) / 1000).toFixed(1) + 'с';
+
+  if (!ranging.length) {
+    status.className = 'scalp-status';
+    status.textContent = `Не найдено монет в боковике ≤ ${tolerance}%. Попробуйте увеличить порог или период.`;
+    grid.innerHTML = '';
+  } else {
+    status.className = 'scalp-status';
+    status.textContent = `Готово — ${ranging.length} монет в боковике, отсортированы по силе сигнала.`;
+    renderScalpGrid(ranging);
+  }
+
+  btn.disabled = false;
+  scalpScanInFlight = false;
+}
+
+function renderScalpGrid(items) {
+  const grid = document.getElementById('scalp-grid');
+  grid.innerHTML = '';
+
+  items.forEach((it, idx) => {
+    const card = document.createElement('div');
+    card.className = 'scalp-card';
+    card.dataset.idx = String(idx);
+
+    const tf1 = sumLastNVolume(it.klines, 1);
+    const tf5 = sumLastNVolume(it.klines, 5);
+    const tf15 = sumLastNVolume(it.klines, 15);
+
+    card.innerHTML = `
+      <div class="scalp-card-head">
+        <div>
+          <div class="scalp-card-symbol">${it.symbol}/USDT</div>
+          <div class="scalp-card-range">
+            Диапазон: <b>${it.stats.rangePct.toFixed(2)}%</b>
+            · ${fmtPrice(it.stats.low)} — ${fmtPrice(it.stats.high)}
+          </div>
+        </div>
+        <span class="scalp-card-exchange ${it.exchange}">${API.SCALP_EXCHANGE_META[it.exchange].label}</span>
+      </div>
+      <div class="scalp-card-chart"><canvas></canvas></div>
+      <div class="scalp-card-touches">
+        <div>↑ касаний: <b>${it.stats.highTouches}</b></div>
+        <div>↓ касаний: <b>${it.stats.lowTouches}</b></div>
+        <div style="margin-left:auto;"><span class="scalp-card-score">⚡ ${it.stats.score.toFixed(1)}</span></div>
+      </div>
+      <div class="scalp-card-tf">
+        <div class="scalp-card-tf-cell">
+          <div class="tf-label">1 мин</div>
+          <div class="tf-vol">${fmtVol(tf1)}</div>
+          <div class="tf-trades">1 свеча</div>
+        </div>
+        <div class="scalp-card-tf-cell">
+          <div class="tf-label">5 мин</div>
+          <div class="tf-vol">${fmtVol(tf5)}</div>
+          <div class="tf-trades">5 свечей</div>
+        </div>
+        <div class="scalp-card-tf-cell">
+          <div class="tf-label">15 мин</div>
+          <div class="tf-vol">${fmtVol(tf15)}</div>
+          <div class="tf-trades">15 свечей</div>
+        </div>
+      </div>
+    `;
+    grid.appendChild(card);
+
+    // Mini sparkline in the card.
+    const canvas = card.querySelector('canvas');
+    drawSparkline(canvas, it.klines, it.stats);
+
+    // Click to open detail modal.
+    card.addEventListener('click', () => openScalpDetail(it));
+  });
+}
+
+// Lightweight pure-canvas sparkline: close-price line + horizontal range
+// markers (no Chart.js — keeps each card cheap to render).
+function drawSparkline(canvas, klines, stats) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const pad = 4;
+  const xs = w - pad * 2, ys = h - pad * 2;
+  const min = stats.low, max = stats.high, range = max - min || 1;
+  const n = klines.length;
+
+  // Range high/low guidelines.
+  ctx.strokeStyle = 'rgba(29,158,117,0.45)';
+  ctx.setLineDash([3, 3]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad, pad);
+  ctx.lineTo(pad + xs, pad);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(216,90,48,0.45)';
+  ctx.beginPath();
+  ctx.moveTo(pad, pad + ys);
+  ctx.lineTo(pad + xs, pad + ys);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Close-price line.
+  ctx.strokeStyle = '#5B8AF0';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = pad + (n > 1 ? (i / (n - 1)) * xs : xs / 2);
+    const y = pad + ys - ((klines[i].c - min) / range) * ys;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+// ─── SCALP DETAIL MODAL ─────────────────────────────────────────────────────
+async function openScalpDetail(item) {
+  const modal = document.getElementById('scalp-modal');
+  modal.hidden = false;
+  modal.dataset.idx = String(scalpResults.indexOf(item));
+
+  document.getElementById('scalp-modal-title').textContent = `${item.symbol}/USDT`;
+  const exEl = document.getElementById('scalp-modal-exchange');
+  exEl.textContent = API.SCALP_EXCHANGE_META[item.exchange].label;
+  exEl.className = 'modal-exchange ' + item.exchange;
+
+  document.getElementById('scalp-modal-price').textContent = fmtPrice(item.pair.price);
+  document.getElementById('scalp-modal-range').textContent = item.stats.rangePct.toFixed(2) + '%';
+  document.getElementById('scalp-modal-high').textContent = fmtPrice(item.stats.high);
+  document.getElementById('scalp-modal-low').textContent = fmtPrice(item.stats.low);
+  document.getElementById('scalp-modal-score').textContent = item.stats.score.toFixed(1);
+  document.getElementById('scalp-modal-vol24').textContent = fmtVol(item.pair.volume24h);
+
+  // Reset tab state.
+  document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector('.modal-tab[data-tf="1m"]').classList.add('active');
+
+  // Render detail charts for 1m/5m/15m + per-tf stats.
+  await renderScalpDetailChart(item, '1m');
+  renderScalpDetailTfStats(item.klines);
+}
+
+async function renderScalpDetailChart(item, tf) {
+  const canvas = document.getElementById('scalpDetailChart');
+  const ctx = canvas.getContext('2d');
+  if (scalpDetailChartInst) { scalpDetailChartInst.destroy(); scalpDetailChartInst = null; }
+
+  let klines;
+  try {
+    // For non-1m we fetch fresh — could cache, but klines are cheap (~1 call).
+    klines = tf === '1m' ? item.klines : await API.getKlines(item.exchange, item.symbol, tf, 60);
+  } catch (e) {
+    klines = item.klines;
+  }
+
+  const labels = klines.map(k => new Date(k.t));
+  const closes = klines.map(k => k.c);
+
+  scalpDetailChartInst = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Цена',
+          data: closes,
+          borderColor: '#5B8AF0',
+          backgroundColor: 'rgba(91,138,240,0.1)',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.15,
+          fill: true,
+        },
+        {
+          label: 'High диапазона',
+          data: klines.map(() => item.stats.high),
+          borderColor: 'rgba(29,158,117,0.55)',
+          borderWidth: 1,
+          borderDash: [4, 4],
+          pointRadius: 0,
+          fill: false,
+        },
+        {
+          label: 'Low диапазона',
+          data: klines.map(() => item.stats.low),
+          borderColor: 'rgba(216,90,48,0.55)',
+          borderWidth: 1,
+          borderDash: [4, 4],
+          pointRadius: 0,
+          fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: c => c.dataset.label + ': ' + fmtPrice(c.raw),
+          },
+        },
+      },
+      scales: {
+        x: { type: 'time', time: { tooltipFormat: 'HH:mm' }, ticks: { color: '#8b90a0', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#8b90a0', callback: v => fmtPrice(v) }, grid: { color: 'rgba(255,255,255,0.04)' } },
+      },
+    },
+  });
+}
+
+function renderScalpDetailTfStats(klines1m) {
+  const cells = [
+    { label: '1 мин', n: 1 },
+    { label: '5 мин', n: 5 },
+    { label: '15 мин', n: 15 },
+  ];
+  const html = cells.map(({ label, n }) => {
+    const last = klines1m.slice(-n);
+    const vol = last.reduce((s, k) => s + (k.qv || 0), 0);
+    const high = Math.max(...last.map(k => k.h));
+    const low = Math.min(...last.map(k => k.l));
+    const move = high && low ? ((high - low) / ((high + low) / 2)) * 100 : 0;
+    return `
+      <div>
+        <div class="tf-head">${label}</div>
+        <div class="tf-row"><span>Объём</span><span>${fmtVol(vol)}</span></div>
+        <div class="tf-row"><span>High</span><span>${fmtPrice(high)}</span></div>
+        <div class="tf-row"><span>Low</span><span>${fmtPrice(low)}</span></div>
+        <div class="tf-row"><span>Размах</span><span>${move.toFixed(2)}%</span></div>
+      </div>
+    `;
+  }).join('');
+  document.getElementById('scalp-modal-tf-stats').innerHTML = html;
+}
+
+function initScalpScanner() {
+  document.getElementById('scalp-scan-btn').addEventListener('click', runScalpScan);
+
+  // Modal close handlers.
+  const modal = document.getElementById('scalp-modal');
+  document.getElementById('scalp-modal-close').addEventListener('click', () => {
+    modal.hidden = true;
+    if (scalpDetailChartInst) { scalpDetailChartInst.destroy(); scalpDetailChartInst = null; }
+  });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      modal.hidden = true;
+      if (scalpDetailChartInst) { scalpDetailChartInst.destroy(); scalpDetailChartInst = null; }
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.hidden) {
+      modal.hidden = true;
+      if (scalpDetailChartInst) { scalpDetailChartInst.destroy(); scalpDetailChartInst = null; }
+    }
+  });
+
+  // Modal timeframe tabs.
+  document.querySelectorAll('.modal-tab').forEach(tab => {
+    tab.addEventListener('click', async () => {
+      document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const tf = tab.dataset.tf;
+      const idx = Number(modal.dataset.idx || 0);
+      const item = scalpResults[idx];
+      if (item) await renderScalpDetailChart(item, tf);
+    });
+  });
+}

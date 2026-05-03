@@ -24,6 +24,9 @@
       <button class="nav-item" data-tab="scam">
         <span class="nav-icon">⚠</span> Скам-паттерн
       </button>
+      <button class="nav-item" data-tab="scalp">
+        <span class="nav-icon">⚡</span> Скальпинг
+      </button>
     </nav>
     <div class="sidebar-status">
       <div class="status-row">
@@ -233,6 +236,108 @@
         </div>
       </div>
     </section>
+
+    <!-- SCALP TAB -->
+    <section class="tab-section" id="tab-scalp">
+      <div class="page-header">
+        <h1>Скальпинг-сканер</h1>
+        <p class="page-sub">Монеты в боковике с активным объёмом — для входа по низу и выхода по верху</p>
+      </div>
+
+      <div class="controls-bar scalp-controls">
+        <div class="control-group">
+          <label>Биржи</label>
+          <div class="exchange-toggles">
+            <label class="toggle-chip">
+              <input type="checkbox" value="mexc" checked/> MEXC
+            </label>
+            <label class="toggle-chip">
+              <input type="checkbox" value="bingx" checked/> BingX
+            </label>
+            <label class="toggle-chip">
+              <input type="checkbox" value="bitget" checked/> Bitget
+            </label>
+          </div>
+        </div>
+        <div class="control-group">
+          <label>Макс. ширина диапазона %</label>
+          <input type="number" id="scalp-tolerance" value="1.5" step="0.1" min="0.1" max="20" style="width:90px;"/>
+        </div>
+        <div class="control-group">
+          <label>Период (мин)</label>
+          <input type="number" id="scalp-lookback" value="60" min="15" max="240" step="5" style="width:90px;"/>
+        </div>
+        <div class="control-group">
+          <label>Топ по объёму на биржу</label>
+          <input type="number" id="scalp-topn" value="30" min="5" max="100" step="5" style="width:90px;"/>
+        </div>
+        <div class="control-group">
+          <label>Мин. касаний High/Low</label>
+          <input type="number" id="scalp-min-touches" value="2" min="0" max="20" step="1" style="width:90px;"/>
+        </div>
+        <button class="refresh-btn" id="scalp-scan-btn">⚡ Сканировать</button>
+      </div>
+
+      <!-- SCALP STATUS -->
+      <div class="scalp-status" id="scalp-status">
+        Нажмите «Сканировать» — алгоритм проверит топ-пары MEXC / BingX / Bitget по 24h-объёму и найдёт те, что сейчас ходят в боковике.
+      </div>
+
+      <!-- SCALP METRICS -->
+      <div class="metrics-row" id="scalp-metrics" hidden>
+        <div class="metric-card">
+          <div class="metric-label">Сканировано пар</div>
+          <div class="metric-value" id="sc-scanned">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">В боковике</div>
+          <div class="metric-value green" id="sc-found">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Лучший Score</div>
+          <div class="metric-value" id="sc-best">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Время скана</div>
+          <div class="metric-value" id="sc-time">—</div>
+        </div>
+      </div>
+
+      <!-- RESULT GRID -->
+      <div id="scalp-grid" class="scalp-grid"></div>
+    </section>
+
+    <!-- DETAIL MODAL — opens when a scalp card is clicked -->
+    <div class="modal-overlay" id="scalp-modal" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="scalp-modal-title">
+        <header class="modal-header">
+          <div class="modal-title-row">
+            <h2 id="scalp-modal-title">—</h2>
+            <span class="modal-exchange" id="scalp-modal-exchange">—</span>
+          </div>
+          <button class="modal-close" id="scalp-modal-close" aria-label="Закрыть">✕</button>
+        </header>
+        <div class="modal-body">
+          <div class="modal-stats">
+            <div><span>Цена</span><b id="scalp-modal-price">—</b></div>
+            <div><span>Диапазон</span><b id="scalp-modal-range">—</b></div>
+            <div><span>High</span><b id="scalp-modal-high">—</b></div>
+            <div><span>Low</span><b id="scalp-modal-low">—</b></div>
+            <div><span>Score</span><b id="scalp-modal-score">—</b></div>
+            <div><span>24h Volume</span><b id="scalp-modal-vol24">—</b></div>
+          </div>
+          <div class="modal-tabs">
+            <button class="modal-tab active" data-tf="1m">1 мин</button>
+            <button class="modal-tab" data-tf="5m">5 мин</button>
+            <button class="modal-tab" data-tf="15m">15 мин</button>
+          </div>
+          <div class="chart-wrap" style="height:340px;">
+            <canvas id="scalpDetailChart"></canvas>
+          </div>
+          <div class="modal-tf-stats" id="scalp-modal-tf-stats"></div>
+        </div>
+      </div>
+    </div>
 
   </main>
 </div>
