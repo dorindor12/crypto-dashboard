@@ -8,6 +8,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/protobufjs@7.2.5/dist/protobuf.min.js"></script>
 </head>
 <body>
 <div class="layout">
@@ -326,8 +328,8 @@
             <label class="toggle-chip"><input type="radio" name="ms-exchange" value="bybit" checked/> Bybit</label>
             <label class="toggle-chip"><input type="radio" name="ms-exchange" value="okx"/> OKX</label>
             <label class="toggle-chip"><input type="radio" name="ms-exchange" value="bitget"/> Bitget</label>
-            <label class="toggle-chip disabled" title="v2: protobuf — следующий PR"><input type="radio" name="ms-exchange" value="mexc" disabled/> MEXC <span class="chip-tag">v2</span></label>
-            <label class="toggle-chip disabled" title="v2: gzip — следующий PR"><input type="radio" name="ms-exchange" value="bingx" disabled/> BingX <span class="chip-tag">v2</span></label>
+            <label class="toggle-chip"><input type="radio" name="ms-exchange" value="mexc"/> MEXC</label>
+            <label class="toggle-chip"><input type="radio" name="ms-exchange" value="bingx"/> BingX</label>
           </div>
         </div>
         <div class="control-group">
